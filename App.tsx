@@ -210,7 +210,6 @@ export default function App() {
       .filter(d => d.isCurrentMonth)
       .map(d => {
         const dateStr = formatDateKey(d.date);
-        const dayName = WEEKDAYS[(d.date.getDay() + 6) % 7]; // Adjust for Mon start index if needed, but getDay() is standard
         const type = d.dayType;
         const holiday = d.holidayName || '';
         const note = (d.note || '').replace(/,/g, ';'); // Escape commas

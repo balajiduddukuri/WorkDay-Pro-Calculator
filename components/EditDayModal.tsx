@@ -45,7 +45,6 @@ export const EditDayModal: React.FC<EditDayModalProps> = ({
   // Theme-based styles
   const isNeon = theme === 'neon';
   const isDark = theme === 'dark';
-  const isLight = theme === 'light';
 
   const modalBg = isNeon 
     ? 'bg-slate-900 border border-cyan-500/30 shadow-[0_0_30px_rgba(6,182,212,0.2)]'
