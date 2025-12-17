@@ -15,7 +15,8 @@ import {
   Sun,
   Moon,
   Zap,
-  User
+  User,
+  Download
 } from 'lucide-react';
 
 import { DayType, CalendarConfig, Theme } from './types';
@@ -39,17 +40,51 @@ const MONTHS = [
 ];
 
 export default function App() {
-  // State - Defaulting to 'neon' theme
-  const [theme, setTheme] = useState<Theme>('neon');
+  // State - with Local Storage Persistence
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('wdp_theme');
+      return (saved as Theme) || 'neon';
+    }
+    return 'neon';
+  });
+
   const [viewDate, setViewDate] = useState(new Date());
-  const [config, setConfig] = useState<CalendarConfig>(DEFAULT_CONFIG);
-  const [customHolidays, setCustomHolidays] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const [config, setConfig] = useState<CalendarConfig>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('wdp_config');
+      return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
+    }
+    return DEFAULT_CONFIG;
+  });
+
+  const [customHolidays, setCustomHolidays] = useState<Record<string, string>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('wdp_holidays');
+      return saved ? JSON.parse(saved) : {};
+    }
+    return {};
+  });
+
+  const [notes, setNotes] = useState<Record<string, string>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('wdp_notes');
+      return saved ? JSON.parse(saved) : {};
+    }
+    return {};
+  });
   
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  // Persistence Effects
+  useEffect(() => { localStorage.setItem('wdp_theme', theme); }, [theme]);
+  useEffect(() => { localStorage.setItem('wdp_config', JSON.stringify(config)); }, [config]);
+  useEffect(() => { localStorage.setItem('wdp_holidays', JSON.stringify(customHolidays)); }, [customHolidays]);
+  useEffect(() => { localStorage.setItem('wdp_notes', JSON.stringify(notes)); }, [notes]);
 
   // Keyboard navigation support
   const handleKeyDown = (e: React.KeyboardEvent, date: Date) => {
@@ -71,15 +106,35 @@ export default function App() {
   [calendarGrid, config]);
 
   // Initial Holiday Fetch on App Launch
+  // Only auto-fetch if we don't have holidays for this month/year combination to avoid over-fetching or overwriting
   useEffect(() => {
     const initialFetch = async () => {
+      // Simple check: if we already have some holidays, maybe don't auto-fetch blindly?
+      // But user requirement was "Fetch on launching". 
+      // We'll fetch and merge.
       if (!config.country) return;
+      
+      // Check if we already have data for this month to prevent aggressive overwrites on reload
+      // A heuristic: check if any key in customHolidays starts with current YYYY-MM
+      const currentMonthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+      const hasDataForMonth = Object.keys(customHolidays).some(k => k.startsWith(currentMonthPrefix));
+
+      if (hasDataForMonth) {
+         // console.log("Data exists for this month, skipping auto-fetch to preserve edits.");
+         return; 
+      }
+
       setIsAiLoading(true);
       try {
         const holidays = await fetchPublicHolidays(config.country, year, month);
         setCustomHolidays(prev => {
           const next = { ...prev };
-          holidays.forEach(h => { next[h.date] = h.name; });
+          holidays.forEach(h => { 
+             // Only add if not already present (preserve manual edits if any exist)
+             if (!next[h.date]) {
+                next[h.date] = h.name; 
+             }
+          });
           return next;
         });
       } catch (e) {
@@ -143,17 +198,50 @@ export default function App() {
   }, [config.country, year, month]);
 
   const clearHolidays = () => {
-    if (confirm("Remove all custom holidays and notes for this session?")) {
+    if (confirm("Remove all custom holidays and notes? This cannot be undone.")) {
       setCustomHolidays({});
       setNotes({});
     }
+  };
+
+  const handleExport = () => {
+    const headers = ['Date', 'Day', 'Type', 'Holiday Name', 'Note', 'Working Hours'];
+    const rows = calendarGrid
+      .filter(d => d.isCurrentMonth)
+      .map(d => {
+        const dateStr = formatDateKey(d.date);
+        const dayName = WEEKDAYS[(d.date.getDay() + 6) % 7]; // Adjust for Mon start index if needed, but getDay() is standard
+        const type = d.dayType;
+        const holiday = d.holidayName || '';
+        const note = (d.note || '').replace(/,/g, ';'); // Escape commas
+        const hours = d.dayType === DayType.WORKDAY ? config.hoursPerDay : 0;
+        return [dateStr, d.date.toLocaleDateString('en-US', { weekday: 'short' }), type, holiday, note, hours].join(',');
+      });
+
+    const csvContent = [
+      `Month Report: ${MONTHS[month]} ${year}`,
+      `Total Working Days: ${stats.totalWorkingDays}`,
+      `Total Working Hours: ${stats.totalWorkingHours}`,
+      '',
+      headers.join(','),
+      ...rows
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `workday-pro-${year}-${month + 1}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getModalData = () => {
     if (!selectedDate) return { holiday: undefined, note: undefined, quote: undefined };
     const key = formatDateKey(selectedDate);
     // Find the dayStat in calendarGrid to get the quote
-    // Using find because selectedDate might be from padding days (prev/next month) which are in the grid
     const dayStat = calendarGrid.find(d => formatDateKey(d.date) === key);
     
     return { 
@@ -351,6 +439,17 @@ export default function App() {
           <div className="pt-6 border-t border-opacity-10 border-current">
              <ChartSection stats={stats} theme={theme} />
           </div>
+
+          {/* Export Actions */}
+           <div className="pt-4 border-t border-opacity-10 border-current">
+             <button
+                onClick={handleExport}
+                className={`w-full flex items-center justify-center space-x-2 py-2 rounded-lg transition-colors border ${styles.buttonSecondary} border-current border-opacity-30`}
+              >
+                <Download className="w-4 h-4" />
+                <span>Export Month CSV</span>
+              </button>
+           </div>
         </div>
 
         {/* Footer with Author Credit */}
