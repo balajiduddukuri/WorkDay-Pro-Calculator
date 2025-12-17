@@ -1,0 +1,5 @@
+{
+  "name": "WorkDay Pro Calculator",
+  "description": "A productivity-focused calendar application to calculate working days, hours, and track holidays with AI-powered holiday suggestions.",
+  "requestFramePermissions": []
+}
